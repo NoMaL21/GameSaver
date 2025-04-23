@@ -4,6 +4,33 @@ import re
 import json
 from datetime import datetime
 from utils import get_timestamp
+import sys
+
+def get_backup_folder_path(profile_name):
+    """
+    프로필 이름을 기반으로 백업 폴더 경로를 생성합니다.
+    프로그램 실행 디렉토리 아래에 'backups' 폴더를 만들고,
+    그 안에 프로필별 폴더를 생성합니다.
+    """
+    # 프로그램 실행 디렉토리 경로 가져오기
+    if getattr(sys, 'frozen', False):
+        # PyInstaller로 생성된 exe 파일인 경우
+        base_dir = os.path.dirname(sys.executable)
+    else:
+        # 일반 Python 스크립트로 실행된 경우
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+    
+    # backups 폴더 경로 생성
+    backups_dir = os.path.join(base_dir, 'backups')
+    
+    # 프로필별 폴더 경로 생성
+    profile_backup_dir = os.path.join(backups_dir, profile_name)
+    
+    # 폴더가 없으면 생성
+    if not os.path.exists(profile_backup_dir):
+        os.makedirs(profile_backup_dir)
+    
+    return profile_backup_dir
 
 def backup_save_file(save_file_path, backup_folder, backup_set_id=None):
     """
@@ -27,11 +54,11 @@ def backup_save_file(save_file_path, backup_folder, backup_set_id=None):
 
 def get_original_filename(backup_file_name):
     """
-    백업 파일명에서 타임스탬프 (YYMMDD_HHMM)를 제거하여 원본 파일명을 반환합니다.
-    예: "save_250401_1526.sav" -> "save.sav"
+    백업 파일명에서 타임스탬프 (YYMMDD_HHMMSS)를 제거하여 원본 파일명을 반환합니다.
+    예: "save_250401_152655.sav" -> "save.sav"
     """
-    # 타임스탬프 패턴: _YYMMDD_HHMM
-    return re.sub(r'_\d{6}_\d{4}', '', backup_file_name)
+    # 타임스탬프 패턴: _YYMMDD_HHMMSS
+    return re.sub(r'_\d{6}_\d{6}', '', backup_file_name)
 
 def restore_save_file(backup_file_path, original_folder, original_file_name=None):
     """
@@ -80,7 +107,7 @@ def save_backup_set(backup_folder, set_id, file_paths, description=None):
             backup_sets = json.load(f)
     
     # 형식화된 날짜 생성
-    formatted_date = datetime.strptime(set_id, "%y%m%d_%H%M").strftime("%Y-%m-%d %H:%M")
+    formatted_date = datetime.strptime(set_id, "%y%m%d_%H%M%S").strftime("%Y-%m-%d %H:%M:%S")
     
     # 새 백업 세트 정보 추가
     backup_sets[set_id] = {
