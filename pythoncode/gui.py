@@ -20,7 +20,7 @@ class SaveManagerGUI:
     def __init__(self, root):
         self.root = root
         self.root.title("게임 세이버")
-        self.root.geometry("540x900")
+        self.root.geometry("540x920")
         self.root.resizable(True, True)
 
         # 스타일 설정 (기존과 동일)
@@ -155,7 +155,10 @@ class SaveManagerGUI:
         self.active_profile_name = None
 
         self.folder_entry.delete(0, tk.END)
-        self.file_listbox.delete(0, tk.END)
+        # 체크박스 초기화
+        for widget in self.checkbox_frame.winfo_children():
+            widget.destroy()
+        self.checkbox_vars.clear()
         self.details_listbox.delete(0, tk.END)
         for item in self.sets_tree.get_children():
             self.sets_tree.delete(item)
@@ -354,7 +357,9 @@ class SaveManagerGUI:
 
             # 세이브 폴더 변경 시, 기존 파일 선택 목록 초기화
             self.save_files = []
-            self.file_listbox.delete(0, tk.END)
+            
+            # 파일 목록 새로고침
+            self._refresh_file_list()
 
             # 활성 프로필이 있다면 해당 프로필 업데이트 및 저장
             if self.active_profile_name:
@@ -435,10 +440,6 @@ class SaveManagerGUI:
         self.button_frame = ttk.Frame(parent)
         self.button_frame.pack(side=tk.BOTTOM, pady=5)
 
-        # 백업 버튼
-        backup_btn = ttk.Button(self.button_frame, text="선택한 파일 백업하기", command=self.backup_files, width=25)
-        backup_btn.pack(side=tk.LEFT, padx=5)
-
     def setup_restore_area(self, parent):
         # 백업 세트 선택 프레임
         sets_frame = ttk.LabelFrame(parent, text="복원할 백업 세트 선택", padding=10)
@@ -493,10 +494,25 @@ class SaveManagerGUI:
         # 이벤트 연결
         self.sets_tree.bind("<<TreeviewSelect>>", self.on_backup_set_selected)
 
+        # 버튼 프레임 생성
+        button_frame = ttk.Frame(parent)
+        button_frame.pack(side=tk.BOTTOM, pady=5, fill=tk.X)
+
+        # 버튼들을 중앙에 배치하기 위한 프레임
+        center_frame = ttk.Frame(button_frame)
+        center_frame.pack(expand=True)
+
+        # 백업 버튼
+        backup_btn = ttk.Button(center_frame, text="선택한 파일 백업하기", command=self.backup_files, width=25)
+        backup_btn.pack(side=tk.LEFT, padx=5)
+
         # 복원 버튼
-        restore_btn = ttk.Button(self.button_frame, text="복원하기", command=self.restore_backup_set, width=15)
+        restore_btn = ttk.Button(center_frame, text="복원하기", command=self.restore_backup_set, width=15)
         restore_btn.pack(side=tk.LEFT, padx=5)
 
+        # 삭제 버튼
+        delete_btn = ttk.Button(center_frame, text="삭제하기", command=self.delete_backup_set, width=15)
+        delete_btn.pack(side=tk.LEFT, padx=5)
 
     def select_save_files(self):
         """사용자가 여러 개의 세이브 파일을 선택"""
@@ -870,6 +886,114 @@ class SaveManagerGUI:
             self.status_label.config(text="복원 중 오류 발생")
             messagebox.showerror("치명적 오류", f"복원 작업 중 예상치 못한 오류 발생:\n{e}", parent=self.root)
 
+    def delete_backup_set(self):
+        """선택한 백업 세트를 삭제합니다."""
+        # 활성 프로필 & 폴더 유효성 검사
+        if not self.active_profile_name:
+            messagebox.showwarning("프로필 필요", "삭제를 진행하려면 먼저 프로필을 선택하거나 생성해주세요.")
+            return
+        if not self.backup_folder or not os.path.isdir(self.backup_folder):
+            messagebox.showerror("오류", "백업 폴더 경로가 유효하지 않습니다.\n현재 프로필의 백업 폴더 설정을 확인하세요.")
+            return
+
+        # 삭제할 세트 선택 확인
+        selected_items = self.sets_tree.selection()
+        if not selected_items:
+            messagebox.showinfo("알림", "삭제할 백업 세트를 목록에서 선택해주세요.")
+            return
+
+        set_id = selected_items[0]
+
+        # backup_sets 데이터 유효성 확인
+        if not isinstance(self.backup_sets, dict) or set_id not in self.backup_sets:
+            messagebox.showerror("오류", "선택한 백업 세트 정보를 찾을 수 없습니다. 목록을 새로고침하거나 백업 데이터를 확인하세요.")
+            return
+
+        backup_set = self.backup_sets.get(set_id)
+
+        # 삭제 확인
+        confirm = messagebox.askyesno(
+            "삭제 확인",
+            f"'{backup_set['description']}' 백업 세트를 삭제하시겠습니까?\n\n"
+            "주의: 이 작업은 되돌릴 수 없습니다!",
+            icon='warning',
+            parent=self.root
+        )
+
+        if not confirm:
+            return
+
+        try:
+            self.progress_bar["value"] = 0
+            self.status_label.config(text="삭제 준비 중...")
+            self.root.update_idletasks()
+
+            # 백업 세트에 속한 파일 경로 가져오기
+            backup_files_paths = get_backup_set_files(self.backup_folder, set_id)
+
+            total_files = len(backup_files_paths)
+            deleted_count = 0
+            error_count = 0
+            error_details = []
+
+            for idx, backup_file_path in enumerate(backup_files_paths, 1):
+                self.update_progress(idx, total_files)
+                try:
+                    if os.path.exists(backup_file_path):
+                        os.remove(backup_file_path)
+                        deleted_count += 1
+                    else:
+                        error_msg = f"파일 없음: {os.path.basename(backup_file_path)}"
+                        print(f"경고: {error_msg}")
+                        error_details.append(error_msg)
+                        error_count += 1
+                except Exception as e:
+                    error_msg = f"{os.path.basename(backup_file_path)}: {str(e)}"
+                    print(f"오류: {error_msg}")
+                    error_details.append(error_msg)
+                    error_count += 1
+
+            # backup_sets.json에서 해당 세트 정보 삭제
+            backup_sets_file = os.path.join(self.backup_folder, "backup_sets.json")
+            if os.path.exists(backup_sets_file):
+                try:
+                    with open(backup_sets_file, 'r', encoding='utf-8') as f:
+                        backup_sets_data = json.load(f)
+                    
+                    if set_id in backup_sets_data:
+                        del backup_sets_data[set_id]
+                        
+                        with open(backup_sets_file, 'w', encoding='utf-8') as f:
+                            json.dump(backup_sets_data, f, ensure_ascii=False, indent=4)
+                except Exception as e:
+                    print(f"백업 세트 정보 파일 업데이트 중 오류: {e}")
+                    error_details.append(f"백업 세트 정보 파일 업데이트 실패: {e}")
+                    error_count += 1
+
+            # 백업 세트 목록 갱신
+            self.load_backup_sets()
+
+            # 결과 메시지
+            result_title = "삭제 완료"
+            result_message = f"{deleted_count}개의 파일이 삭제되었습니다."
+            
+            if error_count > 0:
+                result_title += " (일부 실패)"
+                result_message += f"\n{error_count}개의 파일 삭제에 실패했습니다."
+                print("\n--- 삭제 실패 상세 ---")
+                for detail in error_details:
+                    print(f"- {detail}")
+                print("----------------------------\n")
+                messagebox.showwarning(result_title, result_message + "\n\n자세한 내용은 콘솔 로그를 확인하세요.", parent=self.root)
+            else:
+                messagebox.showinfo(result_title, result_message, parent=self.root)
+
+            self.status_label.config(text=result_title)
+
+        except Exception as e:
+            self.status_label.config(text="삭제 중 오류 발생")
+            messagebox.showerror("치명적 오류", f"삭제 작업 중 예상치 못한 오류 발생:\n{e}", parent=self.root)
+
     def start_auto_refresh(self):
         """파일 목록 자동 새로고침 시작"""
         if self.refresh_thread is None or not self.refresh_thread.is_alive():
@@ -937,6 +1061,49 @@ class SaveManagerGUI:
                         return "break"  # 이벤트 전파 중지
                     file_frame.bind("<MouseWheel>", _on_checkbox_mousewheel)
                     checkbox.bind("<MouseWheel>", _on_checkbox_mousewheel)
+
+            # 백업 세트 정보 업데이트
+            if self.backup_folder and os.path.isdir(self.backup_folder):
+                backup_sets_file = os.path.join(self.backup_folder, "backup_sets.json")
+                if os.path.exists(backup_sets_file):
+                    try:
+                        with open(backup_sets_file, 'r', encoding='utf-8') as f:
+                            backup_sets_data = json.load(f)
+                        
+                        # 각 백업 세트의 파일 존재 여부 확인
+                        sets_to_remove = []
+                        for set_id, backup_set in backup_sets_data.items():
+                            if "files" in backup_set:
+                                files_exist = True
+                                for file in backup_set["files"]:
+                                    file_path = os.path.join(self.backup_folder, file)
+                                    if not os.path.exists(file_path):
+                                        files_exist = False
+                                        break
+                                if not files_exist:
+                                    sets_to_remove.append(set_id)
+                        
+                        # 존재하지 않는 파일이 있는 세트 제거
+                        if sets_to_remove:
+                            for set_id in sets_to_remove:
+                                del backup_sets_data[set_id]
+                            
+                            # 변경된 내용 저장
+                            with open(backup_sets_file, 'w', encoding='utf-8') as f:
+                                json.dump(backup_sets_data, f, ensure_ascii=False, indent=4)
+                            
+                            # UI 업데이트
+                            self.load_backup_sets()
+                            
+                            # 삭제된 세트가 있음을 사용자에게 알림
+                            if len(sets_to_remove) > 0:
+                                messagebox.showinfo(
+                                    "백업 세트 정리",
+                                    f"{len(sets_to_remove)}개의 백업 세트가 삭제되었습니다.\n"
+                                    "삭제된 세트의 파일이 더 이상 존재하지 않습니다."
+                                )
+                    except Exception as e:
+                        print(f"백업 세트 정보 업데이트 중 오류: {e}")
 
         except Exception as e:
             print(f"파일 목록 새로고침 중 오류 발생: {e}")

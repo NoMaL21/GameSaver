@@ -5,6 +5,7 @@ import json
 from datetime import datetime
 from utils import get_timestamp
 import sys
+import time
 
 def get_backup_folder_path(profile_name):
     """
@@ -32,25 +33,40 @@ def get_backup_folder_path(profile_name):
     
     return profile_backup_dir
 
-def backup_save_file(save_file_path, backup_folder, backup_set_id=None):
+def backup_save_file(file_path, backup_folder, timestamp):
     """
-    현재의 save_file_path (예: save.sav)를 백업 폴더에
-    타임스탬프를 추가한 이름으로 복사합니다.
+    세이브 파일을 백업 폴더에 복사합니다.
+    
+    Args:
+        file_path (str): 백업할 파일의 전체 경로
+        backup_folder (str): 백업 폴더의 전체 경로
+        timestamp (str): 백업 세트의 타임스탬프
+        
+    Returns:
+        str: 백업된 파일의 전체 경로
     """
-    if not os.path.exists(save_file_path):
-        raise FileNotFoundError(f"지정된 파일이 존재하지 않습니다: {save_file_path}")
-    
-    if not os.path.exists(backup_folder):
-        os.makedirs(backup_folder)
-    
-    timestamp = backup_set_id or get_timestamp()
-    file_dir, file_name = os.path.split(save_file_path)
-    name, ext = os.path.splitext(file_name)
-    backup_file_name = f"{name}_{timestamp}{ext}"
-    backup_file_path = os.path.join(backup_folder, backup_file_name)
-    
-    shutil.copy2(save_file_path, backup_file_path)
-    return backup_file_path
+    try:
+        # 원본 파일명과 확장자 분리
+        original_filename = os.path.basename(file_path)
+        name, ext = os.path.splitext(original_filename)
+        
+        # 백업 파일명 생성 (파일명_타임스탬프.확장자)
+        backup_filename = f"{name}_{timestamp}{ext}"
+        
+        # 백업 파일의 전체 경로
+        backup_path = os.path.join(backup_folder, backup_filename)
+        
+        # 파일 복사
+        shutil.copy2(file_path, backup_path)
+        
+        # 생성 시간을 현재 시간으로 설정
+        current_time = time.time()
+        os.utime(backup_path, (current_time, current_time))
+        
+        return backup_path
+        
+    except Exception as e:
+        raise Exception(f"파일 백업 중 오류 발생: {str(e)}")
 
 def get_original_filename(backup_file_name):
     """
@@ -82,7 +98,9 @@ def restore_save_file(backup_file_path, original_folder, original_file_name=None
     # 원본 파일명이 제공되지 않은 경우 백업 파일명에서 추출
     if original_file_name is None:
         backup_file_name = os.path.basename(backup_file_path)
-        original_file_name = get_original_filename(backup_file_name)
+        name, ext = os.path.splitext(backup_file_name)
+        # 타임스탬프 부분을 제거하여 원본 파일명 추출
+        original_file_name = name.rsplit('_', 1)[0] + ext
     
     destination_path = os.path.join(original_folder, original_file_name)
     shutil.copy(backup_file_path, destination_path)
